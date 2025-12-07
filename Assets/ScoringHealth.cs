@@ -28,11 +28,11 @@ public class ScoringHealth : MonoBehaviour
         highScore = PlayerPrefs.GetInt("HighScore", 0);
 
         UpdateUI();
-        gameOverPanel.SetActive(false);
+        if (gameOverPanel != null) gameOverPanel.SetActive(false);
 
         // Hook up button events
-        retryButton.onClick.AddListener(RestartGame);
-        mainMenuButton.onClick.AddListener(ReturnToMainMenu);
+        if (retryButton != null) retryButton.onClick.AddListener(RestartGame);
+        if (mainMenuButton != null) mainMenuButton.onClick.AddListener(ReturnToMainMenu);
     }
 
     public void AddScore(int amount)
@@ -64,8 +64,8 @@ public class ScoringHealth : MonoBehaviour
 
     private void UpdateUI()
     {
-        scoreText.text = "Score: " + score;
-        healthBar.value = health;
+        if (scoreText != null) scoreText.text = "Score: " + score;
+        if (healthBar != null) healthBar.value = health;
         if (highScoreText != null)
             highScoreText.text = "High Score: " + highScore;
     }
@@ -73,8 +73,8 @@ public class ScoringHealth : MonoBehaviour
     private void GameOver()
     {
         isGameOver = true;
-        gameOverPanel.SetActive(true);
-        finalScoreText.text = "Final Score: " + score;
+        if (gameOverPanel != null) gameOverPanel.SetActive(true);
+        if (finalScoreText != null) finalScoreText.text = "Final Score: " + score;
 
         // Save new high score if beaten
         if (score > highScore)
@@ -99,5 +99,16 @@ public class ScoringHealth : MonoBehaviour
     {
         Time.timeScale = 1f;
         SceneManager.LoadScene("MainMenu"); // make sure a scene named "MainMenu" exists
+    }
+
+    // --- Small public getters so gameplay scripts can check state without duplicating logic ---
+    public int GetHealth()
+    {
+        return health;
+    }
+
+    public bool IsGameOver()
+    {
+        return isGameOver;
     }
 }

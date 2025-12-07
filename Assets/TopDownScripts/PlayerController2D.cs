@@ -1,37 +1,55 @@
 using UnityEngine;
 
-[RequireComponent(typeof(Rigidbody2D))]
+[RequireComponent(typeof(Rigidbody))]
 public class PlayerController2D : MonoBehaviour
 {
-    public float moveSpeed = 5f;
+    public float moveSpeed = 6f;
     public Transform firePoint;
     public ObjectPool bulletPool;
-    public float fireRate = 0.15f;
-    public int maxHealth = 100;
+    public float fireRate = 0.12f;
 
-    Rigidbody2D rb;
-    Vector2 moveInput;
-    float fireTimer;
-    int currentHealth;
+    public ScoringHealth scoringHealth; // hook up in Inspector or auto-find
+
+    private Rigidbody rb;
+    private Vector3 moveInput;
+    private float fireTimer;
 
     void Awake()
     {
-        rb = GetComponent<Rigidbody2D>();
-        currentHealth = maxHealth;
+        rb = GetComponent<Rigidbody>();
+        rb.useGravity = false;
+        rb.constraints = RigidbodyConstraints.FreezeRotation;
+
+        // Auto-assign ScoringHealth if not set
+        if (scoringHealth == null)
+        {
+#if UNITY_2023_2_OR_NEWER
+            scoringHealth = FindFirstObjectByType<ScoringHealth>();
+#else
+            scoringHealth = FindObjectOfType<ScoringHealth>();
+#endif
+        }
     }
 
     void Update()
     {
-        // Movement input
-        moveInput = new Vector2(Input.GetAxisRaw("Horizontal"), Input.GetAxisRaw("Vertical")).normalized;
+        // Movement input on XZ
+        float h = Input.GetAxisRaw("Horizontal");
+        float v = Input.GetAxisRaw("Vertical");
+        moveInput = new Vector3(h, 0f, v).normalized;
 
-        // Aim: rotate sprite towards mouse (optional: set a separate turret sprite to rotate)
-        Vector3 mouseWorld = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-        Vector2 aimDir = (mouseWorld - transform.position);
-        float angle = Mathf.Atan2(aimDir.y, aimDir.x) * Mathf.Rad2Deg;
-        transform.rotation = Quaternion.Euler(0, 0, angle);
+        // Aim with mouse using raycast to ground
+        Ray ray = Camera.main.ScreenPointToRay(Input.mousePosition);
+        if (Physics.Raycast(ray, out RaycastHit hit, 100f))
+        {
+            Vector3 lookDir = hit.point - transform.position;
+            lookDir.y = 0f;
+            if (lookDir.sqrMagnitude > 0.001f)
+            {
+                transform.rotation = Quaternion.LookRotation(lookDir);
+            }
+        }
 
-        // Shooting
         fireTimer += Time.deltaTime;
         if (Input.GetMouseButton(0) && fireTimer >= fireRate)
         {
@@ -42,30 +60,45 @@ public class PlayerController2D : MonoBehaviour
 
     void FixedUpdate()
     {
-        rb.MovePosition(rb.position + moveInput * moveSpeed * Time.fixedDeltaTime);
+        Vector3 newPos = rb.position + moveInput * moveSpeed * Time.fixedDeltaTime;
+        rb.MovePosition(newPos);
     }
 
-    void Shoot()
+    private void Shoot()
     {
         if (bulletPool == null || firePoint == null) return;
-        var b = bulletPool.Get(firePoint.position, firePoint.rotation);
-        var bullet = b.GetComponent<Bullet2D>();
-        if (bullet != null) bullet.Launch(transform.right); // transform.right points to angle 0 of rotation
+
+        GameObject b = bulletPool.Get(firePoint.position, firePoint.rotation);
+        var bullet = b.GetComponent<Bullet3D>();
+        if (bullet != null)
+        {
+            // shoot along firePoint forward
+            bullet.Launch(firePoint.forward);
+        }
     }
 
     public void TakeDamage(int dmg)
     {
-        currentHealth -= dmg;
-        if (currentHealth <= 0)
+        if (scoringHealth == null)
         {
-            Die();
+#if UNITY_2023_2_OR_NEWER
+            scoringHealth = FindFirstObjectByType<ScoringHealth>();
+#else
+            scoringHealth = FindObjectOfType<ScoringHealth>();
+#endif
         }
-    }
 
-    void Die()
-    {
-        // basic: disable player; expand with respawn or game over screen
-        gameObject.SetActive(false);
-        Debug.Log("Player died - prototype over");
+        if (scoringHealth != null)
+        {
+            scoringHealth.TakeDamage(dmg);
+            if (scoringHealth.IsGameOver())
+            {
+                gameObject.SetActive(false);
+            }
+        }
+        else
+        {
+            Debug.LogWarning("ScoringHealth not found; damage ignored.");
+        }
     }
 }
