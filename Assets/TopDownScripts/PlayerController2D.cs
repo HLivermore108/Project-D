@@ -1,18 +1,35 @@
+using System.Collections;
 using UnityEngine;
 
 [RequireComponent(typeof(Rigidbody))]
 public class PlayerController2D : MonoBehaviour
 {
+    [Header("Movement")]
     public float moveSpeed = 6f;
+
+    [Header("Shooting")]
     public Transform firePoint;
     public ObjectPool bulletPool;
     public float fireRate = 0.12f;
 
-    public ScoringHealth scoringHealth; // hook up in Inspector or auto-find
+    [Header("Game Manager")]
+    public ScoringHealth scoringHealth;   // drag your ScoringHealth object here
+
+    [Header("Audio")]
+    public AudioSource audioSource;       // one AudioSource on the player
+    public AudioClip shootSound;          // sound when shooting
+    public AudioClip hurtSound;           // sound when hit
+
+    [Header("Hit Flash")]
+    public Renderer playerRenderer;       // mesh renderer of your player model
+    public Color flashColor = Color.red;
+    public float flashDuration = 0.1f;
 
     private Rigidbody rb;
     private Vector3 moveInput;
     private float fireTimer;
+    private Color originalColor;
+    private bool hasOriginalColor = false;
 
     void Awake()
     {
@@ -20,7 +37,6 @@ public class PlayerController2D : MonoBehaviour
         rb.useGravity = false;
         rb.constraints = RigidbodyConstraints.FreezeRotation;
 
-        // Auto-assign ScoringHealth if not set
         if (scoringHealth == null)
         {
 #if UNITY_2023_2_OR_NEWER
@@ -29,11 +45,17 @@ public class PlayerController2D : MonoBehaviour
             scoringHealth = FindObjectOfType<ScoringHealth>();
 #endif
         }
+
+        if (playerRenderer != null)
+        {
+            originalColor = playerRenderer.material.color;
+            hasOriginalColor = true;
+        }
     }
 
     void Update()
     {
-        // Movement input on XZ
+        // Movement input (XZ)
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");
         moveInput = new Vector3(h, 0f, v).normalized;
@@ -50,6 +72,7 @@ public class PlayerController2D : MonoBehaviour
             }
         }
 
+        // Shooting
         fireTimer += Time.deltaTime;
         if (Input.GetMouseButton(0) && fireTimer >= fireRate)
         {
@@ -68,17 +91,32 @@ public class PlayerController2D : MonoBehaviour
     {
         if (bulletPool == null || firePoint == null) return;
 
+        // Play shoot sound
+        if (audioSource != null && shootSound != null)
+        {
+            audioSource.PlayOneShot(shootSound);
+        }
+
         GameObject b = bulletPool.Get(firePoint.position, firePoint.rotation);
         var bullet = b.GetComponent<Bullet3D>();
         if (bullet != null)
         {
-            // shoot along firePoint forward
             bullet.Launch(firePoint.forward);
         }
     }
 
     public void TakeDamage(int dmg)
     {
+        // Play hurt sound
+        if (audioSource != null && hurtSound != null)
+        {
+            audioSource.PlayOneShot(hurtSound);
+        }
+
+        // Flash red
+        StartCoroutine(FlashDamage());
+
+        // Talk to ScoringHealth for actual HP logic
         if (scoringHealth == null)
         {
 #if UNITY_2023_2_OR_NEWER
@@ -98,7 +136,22 @@ public class PlayerController2D : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("ScoringHealth not found; damage ignored.");
+            Debug.LogWarning("ScoringHealth not found; damage applied visually but not tracked.");
         }
+    }
+
+    private IEnumerator FlashDamage()
+    {
+        if (playerRenderer == null || !hasOriginalColor)
+            yield break;
+
+        // Set to flash color
+        playerRenderer.material.color = flashColor;
+
+        // Wait a short time
+        yield return new WaitForSeconds(flashDuration);
+
+        // Restore original color
+        playerRenderer.material.color = originalColor;
     }
 }
