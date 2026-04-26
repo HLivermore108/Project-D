@@ -97,6 +97,13 @@ public class ScoringHealth : MonoBehaviour
             finalHighScoreText.text = "High Score: " + highScore;
 
         GameEvents.RaiseGameOver(score, highScore);
+        if (TwoPlayerNetcodeBootstrap.CurrentSessionMode == TwoPlayerNetcodeBootstrap.SessionMode.Multiplayer &&
+            TwoPlayerNetcodeBootstrap.Instance != null &&
+            finalScoreText != null)
+        {
+            finalScoreText.text = "Final Scores\n" + TwoPlayerNetcodeBootstrap.Instance.ScoreboardText;
+        }
+
         Time.timeScale = 0f; // pause the game
     }
 
