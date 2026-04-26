@@ -55,6 +55,12 @@ public class PlayerController2D : MonoBehaviour
 
     void Update()
     {
+        if (PauseMenuController.IsPaused)
+        {
+            moveInput = Vector3.zero;
+            return;
+        }
+
         // Movement input (XZ)
         float h = Input.GetAxisRaw("Horizontal");
         float v = Input.GetAxisRaw("Vertical");

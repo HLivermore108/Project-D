@@ -18,7 +18,9 @@ public class ScoringHealth : MonoBehaviour
     public Button mainMenuButton;
 
     private int score = 0;
-    private int health = 100;
+    private const int MaxHealth = 100;
+
+    private int health = MaxHealth;
     private bool isGameOver = false;
     private int highScore = 0;
 
@@ -26,8 +28,14 @@ public class ScoringHealth : MonoBehaviour
     {
         // Load saved high score
         highScore = PlayerPrefs.GetInt("HighScore", 0);
+        if (PersistentGameManager.HasInstance)
+        {
+            highScore = Mathf.Max(highScore, PersistentGameManager.Instance.SaveData.highScore);
+        }
 
         UpdateUI();
+        GameEvents.RaiseScoreChanged(score, highScore);
+        GameEvents.RaisePlayerHealthChanged(health, MaxHealth);
         if (gameOverPanel != null) gameOverPanel.SetActive(false);
 
         // Hook up button events
@@ -48,6 +56,7 @@ public class ScoringHealth : MonoBehaviour
         }
 
         UpdateUI();
+        GameEvents.RaiseScoreChanged(score, highScore);
     }
 
     public void TakeDamage(int amount)
@@ -60,6 +69,7 @@ public class ScoringHealth : MonoBehaviour
             GameOver();
         }
         UpdateUI();
+        GameEvents.RaisePlayerHealthChanged(health, MaxHealth);
     }
 
     private void UpdateUI()
@@ -86,6 +96,7 @@ public class ScoringHealth : MonoBehaviour
         if (finalHighScoreText != null)
             finalHighScoreText.text = "High Score: " + highScore;
 
+        GameEvents.RaiseGameOver(score, highScore);
         Time.timeScale = 0f; // pause the game
     }
 
