@@ -13,6 +13,7 @@ public static class NetworkPrefabSetup
     private const string EnemySourcePath = "Assets/TopDownScripts/Assets2D/Enemy.prefab";
     private const string ProjectileSourcePath = "Assets/TopDownScripts/Assets2D/Bullet.prefab";
     private const string PlayerOutputPath = OutputFolder + "/NetworkPlayer.prefab";
+    private const string SinglePlayerOutputPath = "Assets/Resources/SinglePlayerPrefabs/SinglePlayerPlayer.prefab";
     private const string EnemyOutputPath = OutputFolder + "/NetworkEnemy.prefab";
     private const string ProjectileOutputPath = OutputFolder + "/NetworkProjectile.prefab";
     private const string PlayerGenerationMarker = PlayerSourcePath + "|network-audio-v5";
@@ -28,6 +29,7 @@ public static class NetworkPrefabSetup
         Directory.CreateDirectory(OutputFolder);
 
         BuildPlayerPrefab();
+        BuildSinglePlayerPrefab();
         BuildEnemyPrefab();
         BuildProjectilePrefab();
 
@@ -39,6 +41,7 @@ public static class NetworkPrefabSetup
     {
         bool missingPrefab =
             AssetDatabase.LoadAssetAtPath<GameObject>(PlayerOutputPath) == null ||
+            AssetDatabase.LoadAssetAtPath<GameObject>(SinglePlayerOutputPath) == null ||
             AssetDatabase.LoadAssetAtPath<GameObject>(EnemyOutputPath) == null ||
             AssetDatabase.LoadAssetAtPath<GameObject>(ProjectileOutputPath) == null;
 
@@ -61,7 +64,7 @@ public static class NetworkPrefabSetup
         RemoveComponents<NetworkTransform>(instance);
         NetworkObject networkObject = EnsureComponent<NetworkObject>(instance);
         networkObject.SynchronizeTransform = false;
-        EnsureComponent<Rigidbody>(instance);
+        ConfigureTopDownPlayerRigidbody(EnsureComponent<Rigidbody>(instance));
 
         var controller = EnsureComponent<NetworkPlayerController2D>(instance);
         controller.playerRenderer = instance.GetComponentInChildren<Renderer>();
@@ -114,6 +117,38 @@ public static class NetworkPrefabSetup
         instance.tag = "Enemy";
         _ = networkObject;
         SaveAndDestroy(instance, EnemyOutputPath);
+    }
+
+    private static void BuildSinglePlayerPrefab()
+    {
+        GameObject source = AssetDatabase.LoadAssetAtPath<GameObject>(PlayerSourcePath);
+        if (source == null)
+        {
+            Debug.LogWarning($"Could not build singleplayer prefab. Missing source prefab: {PlayerSourcePath}");
+            return;
+        }
+
+        Directory.CreateDirectory("Assets/Resources/SinglePlayerPrefabs");
+        GameObject instance = InstantiateEditablePrefab(source, "SinglePlayerPlayer");
+        RemoveComponents<NetworkObject>(instance);
+        RemoveComponents<NetworkTransform>(instance);
+        RemoveComponents<OwnerNetworkTransform>(instance);
+        RemoveComponents<NetworkPlayerController2D>(instance);
+        ConfigureTopDownPlayerRigidbody(EnsureComponent<Rigidbody>(instance));
+        PlayerController2D controller = EnsureComponent<PlayerController2D>(instance);
+        controller.fireRate = Mathf.Max(0.3f, controller.fireRate);
+        controller.firePoint = EnsureFirePoint(instance.transform);
+        instance.tag = "Player";
+
+        SaveAndDestroy(instance, SinglePlayerOutputPath);
+    }
+
+    private static void ConfigureTopDownPlayerRigidbody(Rigidbody rb)
+    {
+        rb.useGravity = false;
+        rb.constraints = RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotation;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
     }
 
     private static void BuildProjectilePrefab()

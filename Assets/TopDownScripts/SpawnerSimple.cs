@@ -21,6 +21,12 @@ public class SpawnerSimple : MonoBehaviour
 
     void Update()
     {
+        if (player == null)
+        {
+            var p = GameObject.FindGameObjectWithTag("Player");
+            if (p != null) player = p.transform;
+        }
+
         timer += Time.deltaTime;
         if (timer >= spawnInterval)
         {

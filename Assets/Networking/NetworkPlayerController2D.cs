@@ -50,6 +50,7 @@ public class NetworkPlayerController2D : NetworkBehaviour
     private Color originalColor;
     private bool hasOriginalColor;
     private AudioSource sfxAudioSource;
+    private float lockedY;
 
     public override void OnNetworkSpawn()
     {
@@ -58,11 +59,8 @@ public class NetworkPlayerController2D : NetworkBehaviour
         DisableNetworkTransformSync();
 
         rb = GetComponent<Rigidbody>();
-        rb.useGravity = false;
-        rb.constraints = RigidbodyConstraints.FreezeRotation;
-        rb.interpolation = RigidbodyInterpolation.Interpolate;
-        rb.isKinematic = !IsOwner;
-        rb.detectCollisions = true;
+        lockedY = transform.position.y;
+        ConfigurePhysicsForOwnership();
 
         if (firePoint == null)
         {
@@ -94,6 +92,7 @@ public class NetworkPlayerController2D : NetworkBehaviour
 
         if (IsOwner)
         {
+            ClampVerticalPosition();
             SyncedPosition.Value = transform.position;
             SyncedRotation.Value = transform.rotation;
             AttachCamera();
@@ -115,7 +114,9 @@ public class NetworkPlayerController2D : NetworkBehaviour
     {
         if (!IsOwner)
         {
-            transform.position = Vector3.Lerp(transform.position, SyncedPosition.Value, 18f * Time.deltaTime);
+            Vector3 targetPosition = SyncedPosition.Value;
+            targetPosition.y = lockedY;
+            transform.position = Vector3.Lerp(transform.position, targetPosition, 18f * Time.deltaTime);
             transform.rotation = Quaternion.Slerp(transform.rotation, SyncedRotation.Value, 18f * Time.deltaTime);
             return;
         }
@@ -160,8 +161,10 @@ public class NetworkPlayerController2D : NetworkBehaviour
             return;
 
         Vector3 newPos = rb.position + moveInput * moveSpeed * Time.fixedDeltaTime;
+        newPos.y = lockedY;
         rb.MovePosition(newPos);
         SyncedPosition.Value = newPos;
+        ClampVerticalVelocity();
     }
 
     private void DisableLegacyControllers()
@@ -187,8 +190,39 @@ public class NetworkPlayerController2D : NetworkBehaviour
         if (rb == null)
             return;
 
+        rb.useGravity = false;
+        rb.constraints = RigidbodyConstraints.FreezePositionY | RigidbodyConstraints.FreezeRotation;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
         rb.isKinematic = !IsOwner;
         rb.detectCollisions = true;
+        ClampVerticalPosition();
+        ClampVerticalVelocity();
+    }
+
+    private void ClampVerticalPosition()
+    {
+        Vector3 position = transform.position;
+        if (Mathf.Approximately(position.y, lockedY))
+            return;
+
+        position.y = lockedY;
+        transform.position = position;
+
+        if (rb != null)
+            rb.position = position;
+    }
+
+    private void ClampVerticalVelocity()
+    {
+        if (rb == null)
+            return;
+
+        Vector3 velocity = rb.linearVelocity;
+        if (Mathf.Approximately(velocity.y, 0f))
+            return;
+
+        velocity.y = 0f;
+        rb.linearVelocity = velocity;
     }
 
     [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Everyone)]

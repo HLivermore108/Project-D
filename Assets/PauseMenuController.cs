@@ -8,6 +8,7 @@ using UnityEngine.UI;
 public class PauseMenuController : MonoBehaviour
 {
     private const string SampleSceneName = "SampleScene";
+    private const string StageTwoSceneName = "SampleScene2";
     private const string MusicVolumeParameter = "MusicVolume";
     private const string SfxVolumeParameter = "SFXVolume";
     private const string FullscreenPrefsKey = "PauseMenu.Fullscreen";
@@ -49,7 +50,7 @@ public class PauseMenuController : MonoBehaviour
 
     private static void EnsureControllerInScene(Scene scene)
     {
-        if (!scene.isLoaded || scene.name != SampleSceneName)
+        if (!scene.isLoaded || !IsPlayableScene(scene.name))
             return;
 
 #if UNITY_2023_2_OR_NEWER
@@ -61,6 +62,11 @@ public class PauseMenuController : MonoBehaviour
 
         var pauseControllerObject = new GameObject("PauseMenuController");
         pauseControllerObject.AddComponent<PauseMenuController>();
+    }
+
+    private static bool IsPlayableScene(string sceneName)
+    {
+        return sceneName == SampleSceneName || sceneName == StageTwoSceneName;
     }
 
     private void Awake()

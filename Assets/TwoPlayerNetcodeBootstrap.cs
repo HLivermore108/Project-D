@@ -4,6 +4,9 @@ using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 public class TwoPlayerNetcodeBootstrap : MonoBehaviour
 {
@@ -15,20 +18,26 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
 
     public static TwoPlayerNetcodeBootstrap Instance { get; private set; }
     public static SessionMode CurrentSessionMode { get; private set; } = SessionMode.SinglePlayer;
+    public const int StageCount = 2;
 
     public string Status => status;
     public bool IsConnected => networkManager != null && (networkManager.IsHost || networkManager.IsClient || networkManager.IsServer);
     public bool IsHostSession => networkManager != null && networkManager.IsHost;
     public bool CanHostStartGame => IsHostSession && SceneManager.GetActiveScene().name == MainMenuSceneName && networkManager.ConnectedClientsIds.Count >= 2;
     public string ScoreboardText => NetworkPlayerController2D.BuildFinalScoreText();
+    public string SelectedStageLabel => GetStageLabel(selectedStageIndex);
 
     private const string MainMenuSceneName = "MainMenu";
     private const string SampleSceneName = "SampleScene";
+    private const string StageTwoSceneName = "SampleScene2";
     private const string StartGameMessage = "ProjectD.StartGame";
     private const ushort DefaultPort = 7777;
     private const string PlayerPrefabPath = "NetworkPrefabs/NetworkPlayer";
+    private const string SinglePlayerPrefabPath = "SinglePlayerPrefabs/SinglePlayerPlayer";
     private const string EnemyPrefabPath = "NetworkPrefabs/NetworkEnemy";
     private const string ProjectilePrefabPath = "NetworkPrefabs/NetworkProjectile";
+    private static readonly string[] StageSceneNames = { SampleSceneName, StageTwoSceneName };
+    private static readonly string[] StageLabels = { "Stage 1", "Stage 2" };
 
     [SerializeField] private string connectAddress = "127.0.0.1";
     [SerializeField] private ushort port = DefaultPort;
@@ -38,9 +47,11 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
     private NetworkManager networkManager;
     private UnityTransport transport;
     private GameObject playerPrefab;
+    private GameObject singlePlayerPrefab;
     private GameObject enemyPrefab;
     private GameObject projectilePrefab;
     private string status = "Offline";
+    private int selectedStageIndex;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void CreateForMenuOrSampleScene()
@@ -57,7 +68,7 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
 
     private static void EnsureBootstrap(Scene scene)
     {
-        if (!scene.isLoaded || (scene.name != MainMenuSceneName && scene.name != SampleSceneName))
+        if (!scene.isLoaded || (scene.name != MainMenuSceneName && !IsPlayableScene(scene.name)))
             return;
 
 #if UNITY_2023_2_OR_NEWER
@@ -109,12 +120,29 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
             networkManager.CustomMessagingManager.UnregisterNamedMessageHandler(StartGameMessage);
     }
 
+    public static string GetStageLabel(int stageIndex)
+    {
+        int clampedIndex = Mathf.Clamp(stageIndex, 0, StageLabels.Length - 1);
+        return StageLabels[clampedIndex];
+    }
+
+    public static string GetStageSceneName(int stageIndex)
+    {
+        int clampedIndex = Mathf.Clamp(stageIndex, 0, StageSceneNames.Length - 1);
+        return StageSceneNames[clampedIndex];
+    }
+
+    public void SelectStage(int stageIndex)
+    {
+        selectedStageIndex = Mathf.Clamp(stageIndex, 0, StageSceneNames.Length - 1);
+    }
+
     public void StartSinglePlayerGame()
     {
         CurrentSessionMode = SessionMode.SinglePlayer;
         Shutdown();
         Time.timeScale = 1f;
-        SceneManager.LoadScene(SampleSceneName);
+        SceneManager.LoadScene(GetStageSceneName(selectedStageIndex));
     }
 
     public void StartHostSession(string address, ushort sessionPort)
@@ -148,13 +176,15 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
         if (!CanHostStartGame)
             return;
 
-        using (var writer = new FastBufferWriter(4, Allocator.Temp))
+        using (var writer = new FastBufferWriter(128, Allocator.Temp))
         {
+            var sceneName = new FixedString64Bytes(GetStageSceneName(selectedStageIndex));
+            writer.WriteValueSafe(sceneName);
             networkManager.CustomMessagingManager.SendNamedMessageToAll(StartGameMessage, writer, NetworkDelivery.ReliableSequenced);
         }
 
         Time.timeScale = 1f;
-        SceneManager.LoadScene(SampleSceneName);
+        SceneManager.LoadScene(GetStageSceneName(selectedStageIndex));
     }
 
     public void Shutdown()
@@ -204,6 +234,7 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
     private void ConfigurePrefabs()
     {
         playerPrefab = Resources.Load<GameObject>(PlayerPrefabPath);
+        singlePlayerPrefab = LoadSinglePlayerPrefab();
         enemyPrefab = Resources.Load<GameObject>(EnemyPrefabPath);
         projectilePrefab = Resources.Load<GameObject>(ProjectilePrefabPath);
 
@@ -280,20 +311,31 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
         if (networkManager.IsHost)
             return;
 
+        reader.ReadValueSafe(out FixedString64Bytes sceneName);
+        string receivedSceneName = sceneName.ToString();
+        selectedStageIndex = GetStageIndex(receivedSceneName);
         CurrentSessionMode = SessionMode.Multiplayer;
         Time.timeScale = 1f;
-        SceneManager.LoadScene(SampleSceneName);
+        SceneManager.LoadScene(GetStageSceneName(selectedStageIndex));
     }
 
     private void HandleSceneLoaded(Scene scene, LoadSceneMode mode)
     {
-        if (scene.name != SampleSceneName || CurrentSessionMode != SessionMode.Multiplayer)
+        if (!IsPlayableScene(scene.name))
             return;
 
         Time.timeScale = 1f;
+        if (CurrentSessionMode == SessionMode.SinglePlayer)
+        {
+            StartCoroutine(SpawnSinglePlayerAfterSceneLoad());
+            return;
+        }
+
+        if (CurrentSessionMode != SessionMode.Multiplayer)
+            return;
+
         ConfigurePrefabs();
         PrepareMultiplayerScene();
-
         if (networkManager != null && networkManager.IsServer)
             StartCoroutine(SpawnPlayersAfterSceneLoad());
     }
@@ -343,6 +385,23 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
             SpawnPlayerIfMissing(clientId);
     }
 
+    private IEnumerator SpawnSinglePlayerAfterSceneLoad()
+    {
+        yield return null;
+
+        PrepareSinglePlayerScene(out Vector3 spawnPosition, out Quaternion spawnRotation);
+        if (singlePlayerPrefab == null)
+        {
+            Debug.LogError("SinglePlayerPlayer prefab was not found. Use Tools/Project D/Build Network Prefabs, or let Unity reimport the editor setup script.");
+            yield break;
+        }
+
+        GameObject player = Instantiate(singlePlayerPrefab, spawnPosition, spawnRotation);
+        player.name = "SinglePlayerPlayer";
+        player.tag = "Player";
+        ConfigureSinglePlayer(player);
+    }
+
     private void SpawnPlayerIfMissing(ulong clientId)
     {
         if (networkManager.SpawnManager.GetPlayerNetworkObject(clientId) != null)
@@ -351,5 +410,104 @@ public class TwoPlayerNetcodeBootstrap : MonoBehaviour
         Vector3 spawnPosition = clientId == NetworkManager.ServerClientId ? hostSpawnPosition : clientSpawnPosition;
         GameObject player = Instantiate(playerPrefab, spawnPosition, Quaternion.identity);
         player.GetComponent<NetworkObject>().SpawnAsPlayerObject(clientId, true);
+    }
+
+    private void PrepareSinglePlayerScene(out Vector3 spawnPosition, out Quaternion spawnRotation)
+    {
+        spawnPosition = hostSpawnPosition;
+        spawnRotation = Quaternion.identity;
+
+        GameObject existingPlayer = GameObject.FindGameObjectWithTag("Player");
+        if (existingPlayer != null)
+        {
+            spawnPosition = existingPlayer.transform.position;
+            spawnRotation = existingPlayer.transform.rotation;
+            existingPlayer.SetActive(false);
+        }
+
+        foreach (PlayerController2D sceneController in FindObjectsByType<PlayerController2D>(FindObjectsSortMode.None))
+        {
+            if (sceneController == null || !sceneController.gameObject.activeInHierarchy)
+                continue;
+
+            spawnPosition = sceneController.transform.position;
+            spawnRotation = sceneController.transform.rotation;
+            sceneController.gameObject.SetActive(false);
+        }
+    }
+
+    private void ConfigureSinglePlayer(GameObject player)
+    {
+        PlayerController2D controller = player.GetComponent<PlayerController2D>();
+        if (controller == null)
+            return;
+
+        controller.scoringHealth = FindFirstObjectByType<ScoringHealth>();
+        controller.bulletPool = FindPoolWithComponent<Bullet3D>();
+        if (controller.firePoint == null)
+            controller.firePoint = EnsureFirePoint(player.transform);
+
+        if (controller.audioSource == null)
+            controller.audioSource = player.GetComponentInChildren<AudioSource>();
+
+        CameraFollow cameraFollow = FindFirstObjectByType<CameraFollow>();
+        if (cameraFollow != null)
+            cameraFollow.player = player.transform;
+    }
+
+    private ObjectPool FindPoolWithComponent<T>() where T : Component
+    {
+        foreach (ObjectPool pool in FindObjectsByType<ObjectPool>(FindObjectsSortMode.None))
+        {
+            if (pool != null && pool.prefab != null && pool.prefab.GetComponent<T>() != null)
+                return pool;
+        }
+
+        return null;
+    }
+
+    private Transform EnsureFirePoint(Transform root)
+    {
+        Transform firePoint = root.Find("NetworkFirePoint");
+        if (firePoint != null)
+            return firePoint;
+
+        var firePointObject = new GameObject("NetworkFirePoint");
+        firePointObject.transform.SetParent(root, false);
+        firePointObject.transform.localPosition = new Vector3(0f, 0.8f, 1.2f);
+        firePointObject.transform.localRotation = Quaternion.identity;
+        return firePointObject.transform;
+    }
+
+    private GameObject LoadSinglePlayerPrefab()
+    {
+        GameObject prefab = Resources.Load<GameObject>(SinglePlayerPrefabPath);
+#if UNITY_EDITOR
+        if (prefab == null)
+            prefab = AssetDatabase.LoadAssetAtPath<GameObject>("Assets/Prefabs/PBRCharacter Variant.prefab");
+#endif
+        return prefab;
+    }
+
+    private static bool IsPlayableScene(string sceneName)
+    {
+        for (int i = 0; i < StageSceneNames.Length; i++)
+        {
+            if (StageSceneNames[i] == sceneName)
+                return true;
+        }
+
+        return false;
+    }
+
+    private static int GetStageIndex(string sceneName)
+    {
+        for (int i = 0; i < StageSceneNames.Length; i++)
+        {
+            if (StageSceneNames[i] == sceneName)
+                return i;
+        }
+
+        return 0;
     }
 }
